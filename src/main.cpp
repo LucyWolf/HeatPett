@@ -3,129 +3,89 @@
 #include <nrf_gpio.h>
 #include <nrf_power.h>
 
-// ==========================================================
-// DEBUG
-// ==========================================================
+// Pins
+#define MOTOR_LEFT   43   // D14 = P1.11
+#define MOTOR_RIGHT  10   // D16 = P0.10
+#define LED_PIN      15   // P0.15
+#define BUTTON_PIN    6   // D1 = P0.06
+#define BATTERY_PIN   4   // P0.04 = AIN2
 
-#define DEBUG_ENABLED 1
-#define DEBUG_HAPTIC  0
-
-#if DEBUG_ENABLED
-  #define DEBUG_BEGIN(x) Serial.begin(x)
-  #define DEBUG_PRINT(x) Serial.print(x)
-  #define DEBUG_PRINTLN(x) Serial.println(x)
-#else
-  #define DEBUG_BEGIN(x)
-  #define DEBUG_PRINT(x)
-  #define DEBUG_PRINTLN(x)
-#endif
-
-// ==========================================================
-// PINS
-// ==========================================================
-
-#define MOTOR_LEFT   43
-#define MOTOR_RIGHT  10
-#define LED_PIN      15
-#define BUTTON_PIN    6
-
-// ==========================================================
-// MOTOR LOGIK
-// ==========================================================
-
+// Motor Logik (wie im Original ESP8266 Code)
 #define HAPTIC_ON  HIGH
 #define HAPTIC_OFF LOW
 
-// ==========================================================
 // BLE
-// ==========================================================
-
 BLEUart bleuart;
 bool connected = false;
 
-// ==========================================================
-// BUTTON
-// ==========================================================
-
+// Button
 unsigned long buttonPressStart = 0;
 bool buttonHeld = false;
 bool buttonWasReleased = true;
 
-// ==========================================================
-// LED
-// ==========================================================
-
+// LED Blink
 unsigned long lastBlink = 0;
 
-// ==========================================================
-// KEEPALIVE OHNE AKKU
-// ==========================================================
+// Akku (angepasst für nRF52840 ADC)
+#define ADCResolution        4095.0   // nRF52840 hat 12bit ADC
+#define ADCVoltageMax        3.6
+#define BATTERY_SHIELD_R1    100.0
+#define BATTERY_SHIELD_R2    220.0
+#define BATTERY_SHIELD_RESISTANCE 180.0
+#define ADCMultiplier ((BATTERY_SHIELD_R1 + BATTERY_SHIELD_R2 + BATTERY_SHIELD_RESISTANCE) / BATTERY_SHIELD_R1)
 
-unsigned long lastBatteryUpdate = 0;
+float getBatteryLevel() {
+  float voltage = ((float)analogRead(BATTERY_PIN)) * ADCVoltageMax / ADCResolution * ADCMultiplier;
+  float level = 0.0f;
+  if (voltage > 3.975f)
+    level = (voltage - 2.920f) * 0.8f;
+  else if (voltage > 3.678f)
+    level = (voltage - 3.300f) * 1.25f;
+  else if (voltage > 3.489f)
+    level = (voltage - 3.400f) * 1.7f;
+  else if (voltage > 3.360f)
+    level = (voltage - 3.300f) * 0.8f;
+  else
+    level = (voltage - 3.200f) * 0.3f;
+  level = (level - 0.05f) / 0.95f;
+  return max(min(level, 1.0f), 0.0f);
+}
 
-// ==========================================================
-// MOTOR AUS
-// ==========================================================
-
-void motorOff() {
+void startupVibration() {
+  digitalWrite(MOTOR_LEFT, HAPTIC_ON);
+  digitalWrite(MOTOR_RIGHT, HAPTIC_ON);
+  delay(400);
+  digitalWrite(MOTOR_LEFT, HAPTIC_OFF);
+  digitalWrite(MOTOR_RIGHT, HAPTIC_OFF);
+  delay(100);
+  digitalWrite(MOTOR_LEFT, HAPTIC_ON);
+  digitalWrite(MOTOR_RIGHT, HAPTIC_ON);
+  delay(400);
+  digitalWrite(MOTOR_LEFT, HAPTIC_OFF);
+  digitalWrite(MOTOR_RIGHT, HAPTIC_OFF);
+  delay(100);
+  digitalWrite(MOTOR_LEFT, HAPTIC_ON);
+  digitalWrite(MOTOR_RIGHT, HAPTIC_ON);
+  delay(600);
   digitalWrite(MOTOR_LEFT, HAPTIC_OFF);
   digitalWrite(MOTOR_RIGHT, HAPTIC_OFF);
 }
 
-// ==========================================================
-// STARTUP VIBRATION
-// ==========================================================
-
-void startupVibration() {
-  DEBUG_PRINTLN("[STARTUP] Vibration");
-
-  digitalWrite(MOTOR_LEFT, HAPTIC_ON);
-  digitalWrite(MOTOR_RIGHT, HAPTIC_ON);
-  delay(800);
-
-  motorOff();
-  delay(150);
-
-  digitalWrite(MOTOR_LEFT, HAPTIC_ON);
-  digitalWrite(MOTOR_RIGHT, HAPTIC_ON);
-  delay(800);
-
-  motorOff();
-  delay(150);
-
-  digitalWrite(MOTOR_LEFT, HAPTIC_ON);
-  digitalWrite(MOTOR_RIGHT, HAPTIC_ON);
-  delay(1000);
-
-  motorOff();
-}
-
-// ==========================================================
-// SHUTDOWN ANIMATION
-// ==========================================================
-
 void shutdownAnimation() {
-  DEBUG_PRINTLN("[POWER] Shutdown animation");
-
   digitalWrite(LED_PIN, HIGH);
   delay(100);
-
   for (int i = 255; i >= 0; i -= 3) {
     analogWrite(LED_PIN, i);
     delay(10);
   }
-
   analogWrite(LED_PIN, 0);
 }
 
-// ==========================================================
-// SLEEP MODE
-// ==========================================================
-
 void goToSleep() {
-  DEBUG_PRINTLN("[POWER] Going to sleep");
-
-  motorOff();
+  digitalWrite(MOTOR_LEFT, HAPTIC_OFF);
+  digitalWrite(MOTOR_RIGHT, HAPTIC_OFF);
+  analogWrite(MOTOR_LEFT, 0);
+  analogWrite(MOTOR_RIGHT, 0);
   digitalWrite(LED_PIN, LOW);
 
   shutdownAnimation();
@@ -134,53 +94,33 @@ void goToSleep() {
   sd_power_system_off();
 }
 
-// ==========================================================
-// BLE CALLBACKS
-// ==========================================================
-
 void connect_callback(uint16_t conn_handle) {
   connected = true;
   digitalWrite(LED_PIN, LOW);
-
-  DEBUG_PRINTLN("[BLE] Connected");
 }
 
 void disconnect_callback(uint16_t conn_handle, uint8_t reason) {
   connected = false;
-  motorOff();
-
-  DEBUG_PRINT("[BLE] Disconnected, reason=");
-  DEBUG_PRINTLN(reason);
+  digitalWrite(MOTOR_LEFT, HAPTIC_OFF);
+  digitalWrite(MOTOR_RIGHT, HAPTIC_OFF);
+  analogWrite(MOTOR_LEFT, 0);
+  analogWrite(MOTOR_RIGHT, 0);
 }
 
-// ==========================================================
-// SETUP
-// ==========================================================
-
 void setup() {
-  DEBUG_BEGIN(115200);
-  delay(200);
-
-  DEBUG_PRINTLN("");
-  DEBUG_PRINTLN("=================================");
-  DEBUG_PRINTLN("HeatPett nRF52840 Booting");
-  DEBUG_PRINTLN("=================================");
-
   pinMode(MOTOR_LEFT, OUTPUT);
   pinMode(MOTOR_RIGHT, OUTPUT);
   pinMode(LED_PIN, OUTPUT);
   pinMode(BUTTON_PIN, INPUT_PULLUP);
 
-  motorOff();
+  digitalWrite(MOTOR_LEFT, HAPTIC_OFF);
+  digitalWrite(MOTOR_RIGHT, HAPTIC_OFF);
   digitalWrite(LED_PIN, LOW);
 
   startupVibration();
 
-  DEBUG_PRINTLN("[BLE] Starting Bluefruit");
-
   Bluefruit.begin();
   Bluefruit.setName("HeatPett");
-
   Bluefruit.Periph.setConnectCallback(connect_callback);
   Bluefruit.Periph.setDisconnectCallback(disconnect_callback);
 
@@ -192,61 +132,32 @@ void setup() {
   Bluefruit.ScanResponse.addName();
   Bluefruit.Advertising.restartOnDisconnect(true);
   Bluefruit.Advertising.start(0);
-
-  DEBUG_PRINTLN("[BLE] Advertising started");
 }
 
-// ==========================================================
-// MOTOR CONTROL
-// ==========================================================
+unsigned long lastBatteryUpdate = 0;
 
-void handleHaptics() {
-  if (!connected) {
-    motorOff();
-    return;
-  }
-
+void loop() {
+  // Motoren steuern (Original ESP8266 Logik übernommen)
   while (bleuart.available() > 0) {
     char data = bleuart.read();
-
     unsigned int haptic_right_level = (data & 0x0F) << 4;
     unsigned int haptic_left_level  = data & 0xF0;
 
     haptic_right_level |= haptic_right_level >> 4;
-    haptic_left_level  |= haptic_left_level >> 4;
+    haptic_left_level  |= haptic_left_level  >> 4;
 
     analogWrite(MOTOR_LEFT,  HAPTIC_OFF ? haptic_left_level  : 0xFF - haptic_left_level);
     analogWrite(MOTOR_RIGHT, HAPTIC_OFF ? haptic_right_level : 0xFF - haptic_right_level);
-
-#if DEBUG_HAPTIC
-    DEBUG_PRINT("[HAPTIC] L=");
-    DEBUG_PRINT(haptic_left_level);
-    DEBUG_PRINT(" R=");
-    DEBUG_PRINTLN(haptic_right_level);
-#endif
   }
-}
 
-// ==========================================================
-// KEEPALIVE
-// ==========================================================
-
-void handleKeepAlive() {
+  // Akkustand senden
   if (connected && millis() - lastBatteryUpdate >= 1000) {
     lastBatteryUpdate = millis();
-
-    // Kein Akku angeschlossen: 100% senden
-    bleuart.write((uint8_t)100);
-
-    DEBUG_PRINTLN("[BLE] Keepalive sent: 100");
+    uint8_t batLevel = (uint8_t)round(max(min(getBatteryLevel() * 100.0f, 100.0f), 0.0f));
+    bleuart.write(batLevel);
   }
-}
 
-// ==========================================================
-// BUTTON
-// ==========================================================
-
-void handleButton() {
+  // Button
   bool buttonPressed = (digitalRead(BUTTON_PIN) == LOW);
 
   if (buttonPressed) {
@@ -256,22 +167,14 @@ void handleButton() {
       buttonPressStart = millis();
       buttonWasReleased = false;
       buttonHeld = false;
-
-      DEBUG_PRINTLN("[BUTTON] Pressed");
     }
 
     if (!buttonHeld && millis() - buttonPressStart >= 5000) {
       buttonHeld = true;
-
-      DEBUG_PRINTLN("[BUTTON] Long press detected");
       goToSleep();
     }
 
   } else {
-    if (!buttonWasReleased) {
-      DEBUG_PRINTLN("[BUTTON] Released");
-    }
-
     buttonWasReleased = true;
     buttonHeld = false;
 
@@ -279,37 +182,15 @@ void handleButton() {
       digitalWrite(LED_PIN, LOW);
     }
   }
-}
 
-// ==========================================================
-// STATUS LED
-// ==========================================================
-
-void handleLedBlink() {
-  bool buttonPressed = (digitalRead(BUTTON_PIN) == LOW);
-
+  // LED alle 3 Sekunden kurz blinken wenn nicht verbunden
   if (!connected && !buttonPressed) {
-    motorOff();
-
     unsigned long now = millis();
-
     if (now - lastBlink >= 3000) {
       lastBlink = now;
-
       digitalWrite(LED_PIN, HIGH);
       delay(80);
       digitalWrite(LED_PIN, LOW);
     }
   }
-}
-
-// ==========================================================
-// LOOP
-// ==========================================================
-
-void loop() {
-  handleHaptics();
-  handleKeepAlive();
-  handleButton();
-  handleLedBlink();
 }
