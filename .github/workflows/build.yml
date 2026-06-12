@@ -10,10 +10,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
@@ -33,7 +33,7 @@ jobs:
           python uf2conv.py .pio/build/nicenano/firmware.hex -c -b 0x26000 -f 0xADA52840 -o firmware.uf2
 
       - name: Upload UF2
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: HeatPett-firmware
           path: firmware.uf2
