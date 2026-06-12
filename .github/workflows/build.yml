@@ -26,11 +26,11 @@ jobs:
       - name: Convert to UF2
         run: |
           pip install intelhex
-          python -c "
-          import urllib.request
-          urllib.request.urlretrieve('https://raw.githubusercontent.com/microsoft/uf2/master/utils/uf2conv.py', 'uf2conv.py')
-          "
-          python uf2conv.py .pio/build/nicenano/firmware.hex -c -b 0x26000 -f 0xADA52840 -o firmware.uf2
+          wget https://raw.githubusercontent.com/microsoft/uf2/master/utils/uf2conv.py
+          wget https://raw.githubusercontent.com/microsoft/uf2/master/utils/uf2families.json
+          find .pio/build -name "firmware.hex"
+          HEX=$(find .pio/build -name "firmware.hex" | head -1)
+          python uf2conv.py $HEX -c -b 0x26000 -f 0xADA52840 -o firmware.uf2
 
       - name: Upload UF2
         uses: actions/upload-artifact@v4
