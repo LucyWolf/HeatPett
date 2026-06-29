@@ -109,12 +109,31 @@ void shutdownAnimation() {
 }
 
 // ═══════════════════════════════════════════
+//  ADVERTISING HELPERS
+// ═══════════════════════════════════════════
+void setNormalAdvertising() {
+  Bluefruit.Advertising.stop();
+  Bluefruit.Advertising.clearData();
+  Bluefruit.Advertising.addFlags(BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE);
+  Bluefruit.Advertising.addName();
+}
+
+void setPairingAdvertising() {
+  Bluefruit.Advertising.stop();
+  Bluefruit.Advertising.clearData();
+  Bluefruit.Advertising.addFlags(BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE);
+  Bluefruit.Advertising.addService(ecosystemSvc);
+  Bluefruit.Advertising.addName();
+}
+
+// ═══════════════════════════════════════════
 //  PAIRING MODE
 // ═══════════════════════════════════════════
 void startPairingMode() {
   Serial.println("[PAIRING] Mode START (20s)");
   pairingMode  = true;
   pairingStart = millis();
+  setPairingAdvertising();
   Bluefruit.Advertising.start(0);
 }
 
@@ -122,10 +141,8 @@ void stopPairingMode() {
   Serial.println("[PAIRING] Mode STOP");
   pairingMode = false;
   digitalWrite(LED_PIN, LOW);
-  // Keep advertising when disconnected so dongle can auto-reconnect
-  if (!connected) {
-    Bluefruit.Advertising.start(0);
-  }
+  setNormalAdvertising();
+  if (!connected) Bluefruit.Advertising.start(0);
 }
 
 // ═══════════════════════════════════════════
@@ -172,6 +189,7 @@ void connect_callback(uint16_t conn_handle) {
   pairingMode = false;
   lastBatSend = millis();
   digitalWrite(LED_PIN, LOW);
+  setNormalAdvertising(); // so restartOnDisconnect uses normal adv data
 }
 
 void disconnect_callback(uint16_t conn_handle, uint8_t reason) {
@@ -216,11 +234,7 @@ void setup() {
   ecosystemSvc.begin();
   bleuart.begin();
 
-  Bluefruit.Advertising.addFlags(BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE);
-  Bluefruit.Advertising.addService(ecosystemSvc);  // custom UUID — dongle scans for this
-  Bluefruit.Advertising.addName();                 // name in ADV so dongle can read it on connect
-
-  // Auto-restart advertising after disconnect
+  setNormalAdvertising();  // normal mode: no ecosystem UUID, dongle connects by address
   Bluefruit.Advertising.restartOnDisconnect(true);
   Bluefruit.Advertising.start(0);
 
