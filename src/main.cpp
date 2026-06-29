@@ -21,16 +21,21 @@
 #define SLEEP_HOLD_MS        5000   // hold duration to enter sleep
 #define PAIRING_DURATION_MS  20000  // pairing mode auto-timeout
 #define PAIRING_BLINK_MS     150    // LED blink interval in pairing mode
-#define KEEPALIVE_MS         1000   // BLE keepalive interval
-#define IDLE_BLINK_ON_MS     80   // LED on duration when not connected
+#define IDLE_BLINK_ON_MS     80     // LED on duration when not connected
 #define IDLE_BLINK_MS        2000   // LED off duration when not connected
+#define BATTERY_INTERVAL_MS  30000  // how often to send battery % to dongle
+
+// UART command bytes (motor data uses 0x00–0xEF)
+#define CMD_PAIR    0xFE
+#define CMD_UNPAIR  0xFD
 
 int motorStrength = 255;  // motor PWM strength (0-255), adjustable via serial
 
 // ═══════════════════════════════════════════
 //  GLOBAL VARIABLES
 // ═══════════════════════════════════════════
-BLEUart bleuart;
+BLEUart    bleuart;
+BLEService ecosystemSvc("B5A47D3E-8C21-4F68-92A0-1E3D5C7B9F04");
 
 volatile bool connected   = false;
 volatile bool pairingMode = false;
@@ -38,11 +43,24 @@ bool buttonWasReleased = true;
 bool sleepTriggered    = false;
 
 unsigned long buttonPressStart = 0;
-unsigned long lastKeepAlive    = 0;
+unsigned long lastBatSend      = 0;
 unsigned long pairingStart     = 0;
 unsigned long lastPairingBlink = 0;
 
 bool pairingLedState = false;
+
+// ═══════════════════════════════════════════
+//  BATTERY
+// ═══════════════════════════════════════════
+uint8_t batteryPercent() {
+  analogReference(AR_INTERNAL_3_0);
+  analogReadResolution(12);
+  int raw = analogRead(BATTERY_PIN);
+  // Assumes 1:2 voltage divider on BATTERY_PIN; adjust if different
+  float vbat = raw * (3.0f / 4096.0f) * 2.0f;
+  int pct = (int)((vbat - 3.0f) / 1.2f * 100.0f);  // 3.0V=0%, 4.2V=100%
+  return (uint8_t)constrain(pct, 0, 100);
+}
 
 // ═══════════════════════════════════════════
 //  MOTOR
@@ -137,9 +155,9 @@ void goToSleep() {
 // ═══════════════════════════════════════════
 void connect_callback(uint16_t conn_handle) {
   Serial.println("[BLE] Connected!");
-  connected     = true;
-  pairingMode   = false;
-  lastKeepAlive = millis();
+  connected   = true;
+  pairingMode = false;
+  lastBatSend = millis();
   digitalWrite(LED_PIN, LOW);
 }
 
@@ -182,11 +200,12 @@ void setup() {
   Bluefruit.Periph.setConnectCallback(connect_callback);
   Bluefruit.Periph.setDisconnectCallback(disconnect_callback);
 
+  ecosystemSvc.begin();
   bleuart.begin();
 
   Bluefruit.Advertising.addFlags(BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE);
   Bluefruit.Advertising.addTxPower();
-  Bluefruit.Advertising.addService(bleuart);
+  Bluefruit.Advertising.addService(ecosystemSvc);  // custom UUID — dongle scans for this
   Bluefruit.ScanResponse.addName();
 
   // Auto-restart advertising after disconnect
@@ -220,13 +239,24 @@ void loop() {
     while (bleuart.available() > 0) {
       uint8_t data = bleuart.read();
 
-      // Decode PatStrap nibble encoding
+      // Command bytes
+      if (data == CMD_PAIR) {
+        Serial.println("[BLE] Remote: start pairing");
+        startPairingMode();
+        continue;
+      }
+      if (data == CMD_UNPAIR) {
+        Serial.println("[BLE] Remote: stop pairing");
+        stopPairingMode();
+        continue;
+      }
+
+      // Decode PatStrap nibble encoding (0x00–0xEF)
       unsigned int haptic_right = (data & 0x0F) << 4;
       unsigned int haptic_left  =  data & 0xF0;
       haptic_right |= haptic_right >> 4;
       haptic_left  |= haptic_left  >> 4;
 
-      // Scale by motor strength
       haptic_left  = (haptic_left  * motorStrength) / 255;
       haptic_right = (haptic_right * motorStrength) / 255;
 
@@ -237,11 +267,12 @@ void loop() {
     stopMotors();
   }
 
-  // ── BLE keepalive ───────────────────────
-  if (connected && millis() - lastKeepAlive >= KEEPALIVE_MS) {
-    lastKeepAlive = millis();
-    bleuart.write((uint8_t)100);
-    Serial.println("[BLE] Keepalive sent");
+  // ── Battery send ────────────────────────
+  if (connected && millis() - lastBatSend >= BATTERY_INTERVAL_MS) {
+    lastBatSend = millis();
+    uint8_t pct = batteryPercent();
+    bleuart.write(pct);
+    Serial.print("[BAT] Sent: "); Serial.print(pct); Serial.println("%");
   }
 
   // ── Button logic ────────────────────────
