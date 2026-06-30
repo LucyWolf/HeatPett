@@ -12,7 +12,7 @@
 #define MOTOR_RIGHT  10   // D16 = P0.10
 #define LED_PIN      15   // P0.15
 #define BUTTON_PIN    6   // D1  = P0.06
-#define BATTERY_PIN   4   // P0.04 = AIN2 (battery voltage)
+#define BATTERY_PIN    4  // P0.04 = AIN2 (SuperMini built-in battery divider)
 
 // ═══════════════════════════════════════════
 //  SETTINGS
@@ -23,7 +23,7 @@
 #define PAIRING_BLINK_MS     150    // LED blink interval in pairing mode
 #define IDLE_BLINK_ON_MS     80     // LED on duration when not connected
 #define IDLE_BLINK_MS        2000   // LED off duration when not connected
-#define BATTERY_INTERVAL_MS  30000  // how often to send battery % to dongle
+#define BATTERY_INTERVAL_MS  15000  // how often to send battery % to dongle
 
 // UART command bytes (motor data uses 0x00–0xEF)
 #define CMD_PAIR    0xFE
@@ -68,8 +68,9 @@ uint8_t batteryPercent() {
   analogReference(AR_INTERNAL_3_0);
   analogReadResolution(12);
   int raw = analogRead(BATTERY_PIN);
-  // Assumes 1:2 voltage divider on BATTERY_PIN; adjust if different
-  float vbat = raw * (3.0f / 4096.0f) * 2.0f;
+  // SuperMini built-in divider: 100kΩ + 100kΩ → Vbat = Vpin * 2
+  float vpin = raw * (3.0f / 4096.0f);
+  float vbat = vpin * 2.0f;
   int pct = (int)((vbat - 3.0f) / 1.2f * 100.0f);  // 3.0V=0%, 4.2V=100%
   return (uint8_t)constrain(pct, 0, 100);
 }
@@ -83,11 +84,15 @@ void stopMotors() {
 }
 
 void startupVibration() {
-  // Single strong pulse on startup to indicate power on
   Serial.println("[VIBRATION] Startup START");
   analogWrite(MOTOR_LEFT,  motorStrength);
   analogWrite(MOTOR_RIGHT, motorStrength);
-  delay(1000);
+  delay(300);
+  stopMotors();
+  delay(150);
+  analogWrite(MOTOR_LEFT,  motorStrength);
+  analogWrite(MOTOR_RIGHT, motorStrength);
+  delay(300);
   stopMotors();
   Serial.println("[VIBRATION] Startup DONE");
 }
@@ -187,9 +192,9 @@ void connect_callback(uint16_t conn_handle) {
   Serial.println("[BLE] Connected!");
   connected   = true;
   pairingMode = false;
-  lastBatSend = millis();
+  lastBatSend = millis() - BATTERY_INTERVAL_MS; // send battery on next loop
   digitalWrite(LED_PIN, LOW);
-  setNormalAdvertising(); // so restartOnDisconnect uses normal adv data
+  setNormalAdvertising();
 }
 
 void disconnect_callback(uint16_t conn_handle, uint8_t reason) {
@@ -292,8 +297,31 @@ void loop() {
       Serial.print("Uptime: "); Serial.println(formatUptime());
 
     } else if (cmd == "battery") {
+      analogReference(AR_INTERNAL_3_0);
+      analogReadResolution(12);
+      int raw = analogRead(BATTERY_PIN);
+      float vpin = raw * (3.0f / 4096.0f);
+      float vbat = vpin * 2.0f;
       Serial.println("battery");
+      Serial.print("Raw ADC: "); Serial.println(raw);
+      Serial.print("Vpin:    "); Serial.print(vpin, 3); Serial.println(" V");
+      Serial.print("Vbat:    "); Serial.print(vbat, 3); Serial.println(" V");
       Serial.print("Battery: "); Serial.print(batteryPercent()); Serial.println("%");
+
+    } else if (cmd == "scan") {
+      // Scan all nRF52840 AIN pins to find battery
+      const int ainPins[] = {2, 3, 4, 5, 28, 29, 30, 31};
+      const char* ainNames[] = {"AIN0/P0.02","AIN1/P0.03","AIN2/P0.04","AIN3/P0.05",
+                                "AIN4/P0.28","AIN5/P0.29","AIN6/P0.30","AIN7/P0.31"};
+      Serial.println("scan");
+      analogReference(AR_INTERNAL_3_0);
+      analogReadResolution(12);
+      for (int i = 0; i < 8; i++) {
+        int raw = analogRead(ainPins[i]);
+        float v = raw * (3.0f / 4096.0f);
+        Serial.print(ainNames[i]); Serial.print(" raw="); Serial.print(raw);
+        Serial.print(" v="); Serial.print(v, 3); Serial.println("V");
+      }
 
     } else if (cmd == "meow") {
       Serial.println("meow");
