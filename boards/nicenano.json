@@ -10,7 +10,13 @@
     "hwids": [["0x239A", "0x8029"]],
     "mcu": "nrf52840",
     "variant": "nicenano",
-    "bootloader": "adafruit_nrf52"
+    "bootloader": "adafruit_nrf52",
+    "softdevice": {
+      "sd_fwid": "0x00B6",
+      "sd_name": "S140",
+      "sd_version": "6.1.1",
+      "sd_flags": 0
+    }
   },
   "connectivity": ["bluetooth"],
   "debug": {
