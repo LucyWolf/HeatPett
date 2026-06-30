@@ -1,39 +1,34 @@
-name: Build UF2
-
-on:
-  push:
-    branches: [ main ]
-  workflow_dispatch:
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install PlatformIO
-        run: pip install platformio
-
-      - name: Build firmware
-        run: pio run
-
-      - name: Convert to UF2
-        run: |
-          pip install intelhex
-          wget https://raw.githubusercontent.com/microsoft/uf2/master/utils/uf2conv.py
-          wget https://raw.githubusercontent.com/microsoft/uf2/master/utils/uf2families.json
-          find .pio/build -name "firmware.hex"
-          HEX=$(find .pio/build -name "firmware.hex" | head -1)
-          python uf2conv.py $HEX -c -b 0x26000 -f 0xADA52840 -o firmware.uf2
-
-      - name: Upload UF2
-        uses: actions/upload-artifact@v4
-        with:
-          name: HeatPett-firmware
-          path: firmware.uf2
+{
+  "build": {
+    "arduino": {
+      "ldscript": "nrf52840_s140_v6.ld"
+    },
+    "core": "nRF5",
+    "cpu": "cortex-m4",
+    "extra_flags": "-DNRF52840_XXAA -DARDUINO_NRF52_ADAFRUIT",
+    "f_cpu": "64000000L",
+    "hwids": [["0x239A", "0x8029"]],
+    "mcu": "nrf52840",
+    "variant": "nice_nano",
+    "bootloader": "adafruit_nrf52"
+  },
+  "connectivity": ["bluetooth"],
+  "debug": {
+    "jlink_device": "nRF52840_xxAA",
+    "svd_path": "nrf52840.svd"
+  },
+  "frameworks": ["arduino"],
+  "name": "nice!nano",
+  "upload": {
+    "maximum_ram_size": 248832,
+    "maximum_size": 815104,
+    "speed": 115200,
+    "protocol": "nrfutil",
+    "protocols": ["jlink", "nrfjprog", "nrfutil"],
+    "use_1200bps_touch": true,
+    "wait_for_upload_port": true,
+    "require_upload_port": true
+  },
+  "url": "https://nicekeyboards.com",
+  "vendor": "nice!nano"
+}
